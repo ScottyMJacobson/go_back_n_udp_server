@@ -97,14 +97,14 @@ int main(int argc, char**argv)
     bytes_written = sendto(sockfd,&request_msg,sizeof(request_msg),0,
              (struct sockaddr *)&servaddr,sizeof(servaddr));
       
-    
+
     while (fgets(sendline, 10000,stdin) != NULL)
     {
 
 
 
-      printf("Wrote %d bytes\n", n);
-      n=recvfrom(sockfd,recvline,10000,0,NULL,NULL);
+      printf("Wrote %d bytes\n", bytes_written);
+      bytes_written = recvfrom(sockfd,recvline,10000,0,NULL,NULL);
       recvline[n]=0;
       fputs(recvline,stdout);
     }

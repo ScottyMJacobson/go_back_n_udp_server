@@ -22,76 +22,87 @@ A UDP client that facilitates a file transfer using the Go-Back-N protocol
 typedef int sockfd_t;
 sockfd_t socket_factory (uint16_t port);
 
+//
+// MESSAGE STRUCTS PER TYPE
+//
+// TYPE 1 - RRQ
+#define uFILENAME_SIZE 20
+struct __attribute__((__packed__)) message_1RRQ {
+unsigned char msg_type;
+unsigned char win_size;
+char filename[uFILENAME_SIZE];
+};
+
+// TYPE 2 - DATA
+#define uDATASIZE 512
+struct __attribute__((__packed__)) message_2DATA {
+unsigned char msg_type;
+unsigned char seq_no;
+char data[uFILENAME_SIZE];
+};
+
+// TYPE 3 - ACK
+struct __attribute__((__packed__)) message_3ACK {
+unsigned char msg_type;
+unsigned char seq_no;
+};
+
+// TYPE 4 - ERROR
+struct __attribute__((__packed__)) message_4ERROR {
+unsigned char msg_type;
+};
+
 
 
 int main(int argc, char**argv)
 {
+  int portno;    
+  //Check that port is provided
+  if (argc < 2) 
+  {
+    fprintf(stderr, "%s\n", "ERROR: No port provided");
+    exit(1);
+  }
+  //Grab port number
+  portno = atoi(argv[1]);
+
    int sockfd,n;
    struct sockaddr_in servaddr,cliaddr;
-   char sendline[1028];
-   char recvline[1028];
-
+   char sendline[1000];
+   char recvline[1000];
 
    if (argc != 2)
    {
-      printf("usage: udpcli <port>\n");
+      printf("usage:  udpcli <port>\n");
       exit(1);
    }
-   
-   unsigned short port = atoi(argv[1]);
 
    sockfd=socket(AF_INET,SOCK_DGRAM,0);
 
    bzero(&servaddr,sizeof(servaddr));
    servaddr.sin_family = AF_INET;
-   servaddr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
-   servaddr.sin_port=htons(port);
+   servaddr.sin_addr.s_addr=inet_addr("127.0.0.1");
+   servaddr.sin_port=htons(portno);
 
-   while (fgets(sendline, 1028,stdin) != NULL)
+   while (fgets(sendline, 10000,stdin) != NULL)
    {
-      fprintf(stderr, "Sending %s\n", sendline);
-      sendto(sockfd,sendline,strlen(sendline),0,
+      struct message_1RRQ request_msg;
+      request_msg.msg_type = 1;
+      strcpy(request_msg.filename, "TestFilename");
+      request_msg.win_size = 5;
+
+      printf("Sending!\n");
+      
+      n = sendto(sockfd,&request_msg,sizeof(request_msg),0,
              (struct sockaddr *)&servaddr,sizeof(servaddr));
-      n=recvfrom(sockfd,recvline,1028,0,NULL,NULL);
+      
+      printf("Wrote %d bytes yow\n", n);
+      n=recvfrom(sockfd,recvline,10000,0,NULL,NULL);
       recvline[n]=0;
       fputs(recvline,stdout);
    }
+   return 0;
 }
 
-/*////////////////////////////////////////////////////////////////////////////
-
-_____________  ____________ 
-[__ |  ||   |_/ |___ | [__  
-___]|__||___| \_|___ | ___] 
-                            
-*/
-//Takes in port number, returns a sockfd_t file descriptor representing 
-//  the server socket it creates
-sockfd_t socket_factory (uint16_t port)
-{
-  sockfd_t retfd;
-  struct sockaddr_in serv_addr;
-
-  //Create the socket and make sure it didn't fail
-  retfd = socket (AF_INET, SOCK_DGRAM, 0);
-  if (retfd < 0)
-  {
-    perror ("ERROR: Failed to create socket");
-    exit (EXIT_FAILURE);
-  }
-
-  //Set socket serv_addr attributes and set port
-  bzero(&serv_addr, sizeof(serv_addr));
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons (port);
-  serv_addr.sin_addr.s_addr = htonl (INADDR_ANY);
-  if (bind (retfd, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0)
-  {
-    perror ("ERROR: Failed to bind socket with specified settings");
-    exit (EXIT_FAILURE);
-  }
-
-  return retfd;
-}
 
 

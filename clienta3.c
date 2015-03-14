@@ -58,50 +58,57 @@ int main(int argc, char**argv)
 {
   int portno;    
   //Check that port is provided
-  if (argc < 2) 
+  if (argc < 4) 
   {
-    fprintf(stderr, "%s\n", "ERROR: No port provided");
+    fprintf(stderr, "%s\n", "Usage: testclient <port> <filename> <window_size>");
     exit(1);
   }
   //Grab port number
-  portno = atoi(argv[1]);
+    portno = atoi(argv[1]);
 
-   int sockfd,n;
-   struct sockaddr_in servaddr,cliaddr;
-   char sendline[1000];
-   char recvline[1000];
+    int sockfd, bytes_written;
+    struct sockaddr_in servaddr,cliaddr;
+    char sendline[1000];
+    char recvline[1000];
 
-   if (argc != 2)
-   {
-      printf("usage:  udpcli <port>\n");
-      exit(1);
-   }
+    sockfd=socket(AF_INET,SOCK_DGRAM,0);
 
-   sockfd=socket(AF_INET,SOCK_DGRAM,0);
+    bzero(&servaddr,sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr=inet_addr("127.0.0.1");
+    servaddr.sin_port=htons(portno);
 
-   bzero(&servaddr,sizeof(servaddr));
-   servaddr.sin_family = AF_INET;
-   servaddr.sin_addr.s_addr=inet_addr("127.0.0.1");
-   servaddr.sin_port=htons(portno);
+    //Send request for filename
+    char filename[20];
+    strcpy(filename, argv[2]);
+    fprintf(stderr, "Requesting file named %s\n", filename);
 
-   while (fgets(sendline, 10000,stdin) != NULL)
-   {
-      struct message_1RRQ request_msg;
-      request_msg.msg_type = 1;
-      strcpy(request_msg.filename, "TestFilename");
-      request_msg.win_size = 5;
+    //Get window number
+    int window_size;
+    window_size = atoi(argv[3]);
+    fprintf(stderr, "With window size %u\n", window_size);
 
-      printf("Sending!\n");
+    struct message_1RRQ request_msg;
+    request_msg.msg_type = 1;
+    strcpy(request_msg.filename, filename);
+    request_msg.win_size = window_size;
+    printf("Sending RRQ!\n");
       
-      n = sendto(sockfd,&request_msg,sizeof(request_msg),0,
+    bytes_written = sendto(sockfd,&request_msg,sizeof(request_msg),0,
              (struct sockaddr *)&servaddr,sizeof(servaddr));
       
-      printf("Wrote %d bytes yow\n", n);
+    
+    while (fgets(sendline, 10000,stdin) != NULL)
+    {
+
+
+
+      printf("Wrote %d bytes\n", n);
       n=recvfrom(sockfd,recvline,10000,0,NULL,NULL);
       recvline[n]=0;
       fputs(recvline,stdout);
-   }
-   return 0;
+    }
+    return 0;
 }
 
 

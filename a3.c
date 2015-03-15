@@ -21,7 +21,7 @@ A UDP server that facilitates a file transfer using the Go-Back-N protocol
 #define uBUFFER_SIZE 1028
 #define uBABY_BUFFER 4
 #define uTIMEOUT_US 3000
-#define uTIMEOUT_SEC 10
+#define uTIMEOUT_SEC 0
 
 //
 // SOCKET TYPEDEF AND FORWARD DECLARATION
@@ -165,13 +165,13 @@ int main(int argc, char**argv)
 
     //Set the timeout value! Get reaaaady!
     struct timeval timeout_val;
-    timeout_val.tv_sec = uTIMEOUT_SEC;  // 3 ms timeout
-    timeout_val.tv_usec = uTIMEOUT_US;  // Which is actually 3000 us
+    timeout_val.tv_sec = uTIMEOUT_SEC;  // 0 full seconds timeout
+    timeout_val.tv_usec = uTIMEOUT_US;  // But actually 3000 us == 3 ms
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout_val,sizeof(struct timeval));
 
     printf("-------------------------------------------------------\n");
     transfer_success = begin_transfer(temp_buffer, bytes_read, &current_state);
-    fprintf(stderr, "Transfer returned %d. Restting state and timeout\n", transfer_success);
+    fprintf(stderr, "Transfer returned %d. Resetting state and timeout\n", transfer_success);
     reset_state(&current_state);
 
     //Turn the timeout value off
@@ -254,10 +254,11 @@ int transfer_file (struct server_state* pcurrent_state)
   pcurrent_state->final_seq_size = pcurrent_state->file_size % uDATASIZE;
   fprintf(stderr, "Max seq number is %u. Final seq size is %u.\n", pcurrent_state->max_seq_no, 
                                                                   pcurrent_state->final_seq_size);
-  if (pcurrent_state->win_size > pcurrent_state->max_seq_no) 
+  if (pcurrent_state->win_size > pcurrent_state->max_seq_no + 1) 
   {
-    fprintf(stderr, "Specified impossible window size. Making max instead.\n");
-    pcurrent_state->win_size = pcurrent_state->max_seq_no+1;
+    pcurrent_state->win_size = pcurrent_state->max_seq_no + 1;
+    fprintf(stderr, "Specified impossible window size. Making max %u instead.\n", pcurrent_state->win_size);
+    
   }
 
   pcurrent_state->final_window_bottom = pcurrent_state->max_seq_no - pcurrent_state->win_size + 1;
@@ -288,9 +289,15 @@ int send_window(struct server_state* pcurrent_state)
   int window_top = window_bottom + pcurrent_state->win_size - 1;
   fprintf(stderr, "Sending window from %u to %u...\n", window_bottom, window_top);
 
-  //Is this the final window? That will affect how wait_for_ACK behaves
-  if (window_bottom == pcurrent_state->final_window_bottom) 
+  if (window_top >= pcurrent_state->max_seq_no) 
   { // if it is the final window, set the the flag (this becomes important in wait_for_ACK)
+    fprintf(stderr, "Just kidding, this is the final window!\n");
+    window_top = pcurrent_state->max_seq_no;
+    fprintf(stderr, "Its new bottom - top is %u - %u!\n", window_bottom, window_top);
+    if (window_bottom > pcurrent_state->max_seq_no)
+    {
+      return 1;
+    }
     fprintf(stderr, "Setting final window flag!\n");
     pcurrent_state->this_is_final_window = 1;
   }
@@ -310,10 +317,9 @@ int send_window(struct server_state* pcurrent_state)
     //load that seq, char by char!
     //seek to its start first!
     seq_start = current_seq_loading * uDATASIZE;
-    fprintf(stderr, "Seeking to %u\n", seq_start);
     fseek(pcurrent_state->pfile_to_transfer, seq_start, SEEK_SET);
 
-    if (!pcurrent_state->this_is_final_window && current_seq_loading < pcurrent_state->max_seq_no)
+    if (!pcurrent_state->this_is_final_window || current_seq_loading < pcurrent_state->max_seq_no)
     { //if this isn't the final window, we can't possibly be on the last seq, and
       //don't have to worry about it not being 512
       fprintf(stderr, "Loading and shipping seq number %u from %u to %u\n", current_seq_loading, seq_start, seq_start+uDATASIZE-1);
@@ -328,7 +334,7 @@ int send_window(struct server_state* pcurrent_state)
     }
     else 
     { //this is the last seq - treat it gingerly!
-      fprintf(stderr, "Loading and shipping LAST SEQ EVER of size %u, starting from %u\n", pcurrent_state->final_seq_size, seq_start);
+      fprintf(stderr, "Loading and shipping LAST SEQ EVER %u of size %u, starting from %u\n", current_seq_loading, pcurrent_state->final_seq_size, seq_start);
       while (bytes_loaded < pcurrent_state->final_seq_size)
       {
         temp_char = fgetc(pcurrent_state->pfile_to_transfer);
@@ -368,7 +374,7 @@ int wait_for_ACK(struct server_state* pcurrent_state)
       return -1; // we ran out =[ ... let the program know
     }
     // we didn't hit 5, so resend
-    fprintf(stderr, "Resending! Setting last_seq_sent %u to the last ACK received %u\n", pcurrent_state->last_seq_sent, pcurrent_state->recent_ACK_received);
+    fprintf(stderr, "Resending! Setting last_seq_sent %d to the last ACK received %d\n", pcurrent_state->last_seq_sent, pcurrent_state->recent_ACK_received);
     pcurrent_state->last_seq_sent = pcurrent_state->recent_ACK_received;
     return send_window(pcurrent_state);
   }
@@ -380,7 +386,7 @@ int wait_for_ACK(struct server_state* pcurrent_state)
 
     if (current_ACK_msg.seq_no >= pcurrent_state->recent_ACK_received)
     { // if it's greater than any ACK we've gotten before
-
+      pcurrent_state->consecutive_timeouts = 0; //reset the count!
       if (pcurrent_state->this_is_final_window)
       {      // if this is the last window
         if (current_ACK_msg.seq_no == pcurrent_state->max_seq_no)
@@ -417,7 +423,7 @@ int send_data_msg(char* pdata_buffer, int size_of_data, int seq_no, struct serve
   data_message.msg_type = MESSAGE_TYPE_DATA;
   data_message.seq_no = seq_no;
 
-  fprintf(stderr, "%s\n", data_message.data);
+  //fprintf(stderr, "%s\n", data_message.data);
 
   char* msg_as_pointer = (char*) &data_message;
 
@@ -494,6 +500,7 @@ int validate_and_unpack (char* pmessage_buffer, int imessage_size, int iexpected
       }
       struct message_3ACK* pACK_msg_unpacked = pdestination_message;
       pACK_msg_unpacked->msg_type = pmessage_buffer[0];
+      fprintf(stderr, "Grabbed meessage type %u\n", pACK_msg_unpacked->msg_type);
       if (pACK_msg_unpacked->msg_type != MESSAGE_TYPE_ACK) 
       {
         fprintf(stderr, "ERROR: Initial message type was %u\n", pACK_msg_unpacked->msg_type);
